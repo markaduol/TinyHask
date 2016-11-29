@@ -1,5 +1,5 @@
 # BasicHask
-Compiler for a minimal functional language.
+Compiler for a minimal functional language (in progress).
 
 Work based mainly upon
 
