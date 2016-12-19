@@ -31,8 +31,7 @@ data TiDump = DummyTiDump deriving (Show)
 -- TiHeap is represented as a heap that contains objects of type Node
 type TiHeap = Heap (Node Name)
 
--- Associates each supercombinator name with a heap address containing it's
--- definition
+-- Associates each supercombinator name with a heap address containing it's definition.
 type TiGlobals = Map.Map Name Addr
 
 type TiStats = Int
@@ -41,11 +40,11 @@ type TiStats = Int
 
 data TiState
   = TiState
-  { stack   :: TiStack  -- Stack of addresses, each of which identifies a node in the heap
-  , dump    :: TiDump  -- Records state of stack, prior to evaluation of argument
-  , heap    :: TiHeap  -- Mapping of addresses to nodes
-  , globals :: TiGlobals  -- Gives the address of each heap node representing each supercombinator/prmitive.
-  , stats   :: TiStats  -- Statistics on what the machine does
+  { stack   :: TiStack   -- Stack of addresses, each of which identifies a node in the heap.
+  , dump    :: TiDump    -- Records state of stack, prior to evaluation of argument.
+  , heap    :: TiHeap    -- Mapping of addresses to nodes.
+  , globals :: TiGlobals -- Gives the address of each heap node representing each supercombinator/prmitive.
+  , stats   :: TiStats   -- Statistics on what the machine does.
   } deriving (Show)
 
 newtype TiMachine a = TiMachine {runTiMachine :: State TiState a}
@@ -66,8 +65,8 @@ instance Monad TiMachine where
 
 --------------------------- TI-MACHINE INITIIALISATION -------------------------
 
-initialTiDump :: TiDump
-initialTiDump = DummyTiDump
+initial_tidump :: TiDump
+initial_tidump = DummyTiDump
 
 initial_stats  :: TiStats
 tiStatIncSteps :: TiStats -> TiStats
@@ -84,9 +83,10 @@ applyToStats f = do
   stats_fld <- gets stats
   modify $ \s -> s {stats = f stats_fld}
 
+-- Compiler takes a program, and from it, creates the initial state of the machine.
 compile :: CoreProgram -> TiState
 compile program
-  = TiState initial_stack initialTiDump initial_heap globals initial_stats
+  = TiState initial_stack initial_tidump initial_heap globals initial_stats
   where
     sc_defs                 = program ++ preludeDefs ++ extraPreludeDefs
     (initial_heap, globals) = buildInitialHeap sc_defs
@@ -98,10 +98,12 @@ compile program
 -- TODO: Parallelise
 buildInitialHeap :: [CoreScDefn] -> (TiHeap, TiGlobals)
 buildInitialHeap sc_defs
-  = transToMapGlobals (mapAccumL allocate_sc hInitial sc_defs)
+  = transToMapGlobals (List.mapAccumL allocate_sc hInitial sc_defs)
   where
+    transToMapGlobals :: (TiHeap, [(Name, Addr)]) -> (TiHeap, Map.Map Name Addr)
     transToMapGlobals (tiHeap, globals)
       = (tiHeap, Map.fromList globals)
+    allocate_sc :: TiHeap -> CoreScDefn -> (TiHeap, (Name, Addr))
     allocate_sc heap (sc_name, sc_args, sc_body)
       = (heap', (sc_name, allocatedAddr))
       where
