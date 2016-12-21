@@ -3,4 +3,6 @@ Compiler for a minimal functional language (in progress).
 
 Work based mainly upon
 
-Peyton Jones, Simon L., and David R. Lester. "The Implementation of Functional Programming Languages." The Implementation of Functional Programming Languages. Prentice Hall, 23 Mar. 2000. Web. 28 Nov. 2016.
+Jones, Simon Peyton. The Implementation of Functional Programming Languages. Englewood Cliffs, NJ: Prentice/Hill International, 1987. Print.
+
+Jones, Simon Peyton, and David R. Lester. Implementing Functional Languages: A Tutorial. New York: Prentice Hall, 1992. Print.
