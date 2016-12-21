@@ -31,9 +31,6 @@ hSize :: Heap a -> Int
 hNull :: Addr
 -- Check whether the given address is equal to 'hNull'.
 hIsNull :: Addr -> Bool
--- Shows addresses as an array of characters. This is useful for showing
--- addresses in different formats.
-showAddr :: Addr -> [Char]
 
 ------------------------------ IMPLEMENTATION ------------------------------
 data Heap a
@@ -78,5 +75,3 @@ hSize heap
 hNull = 0
 
 hIsNull addr = addr == hNull
-
-showAddr addr = "#" ++ (show addr)

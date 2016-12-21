@@ -47,6 +47,7 @@ data TiState
   , stats   :: TiStats   -- Statistics on what the machine does.
   } deriving (Show)
 
+-------------------------------- DEPRECATED ----------------------------------------
 newtype TiMachine a = TiMachine {runTiMachine :: State TiState a}
   deriving (MonadState TiState)
 
@@ -62,6 +63,7 @@ instance Monad TiMachine where
   k >>= f = state $ \s ->
     let (a, s') = runState (runTiMachine k) s
     in runState (runTiMachine (f a)) s'
+-----------------------------------------------------------------------------------
 
 --------------------------- TI-MACHINE INITIIALISATION -------------------------
 
@@ -77,11 +79,6 @@ tiStatIncSteps s = s+1
 tiStatGetSteps s = s
 
 ---------------------------- UTILITY FUNCTIONS ---------------------------------
-
-applyToStats :: (TiStats -> TiStats) -> TiMachine ()
-applyToStats f = do
-  stats_fld <- gets stats
-  modify $ \s -> s {stats = f stats_fld}
 
 -- Compiler takes a program, and from it, creates the initial state of the machine.
 compile :: CoreProgram -> TiState

@@ -2,23 +2,40 @@ module Evaluator where
 
 import Syntax
 import Language
-import PrettyPrinter as PP
+import PrettyPrinter
 import Utils
 import Compiler
+
 import Data.Map as Map
 import Data.List as List
 import Control.Monad.State
+import Text.PrettyPrint as PP
 
--- Return all states from initial state to final state
-eval :: TiMachine [TiState]
-eval = state eval'
+----------------------------------- USAGE ------------------------------------
+-- Basically, the 'TiMachine' abstract data type acts as a wrapper for the
+-- state transition system.
+
+-- 'State s a' is actually a synonym for the monad state transformer with the
+-- identity monad: 'StateT s Identity a'.
+-- It therefore simply acts as an extra wrapper for the actual 'state'
+-- and 'result' abstract data types, represented by 's' and 'a' respectively.
+
+-- We can run 'State s a' with the function 'runState :: State s a -> s -> (a, s)',
+-- given some initial state 's'.
+
+-- 'core_prog' has type 'CoreProgram'
+
+-- (showResults . fst . eval . compile) core_prog
+-------------------------------------------------------------------------------
+
+-- Evaluate compiled program from initial state and return all states from
+-- initial state to final state.
+eval :: TiState -> ([TiState], TiState)
+eval st = (st : sts, final_st)
   where
-    eval' :: TiState -> ([TiState], TiState)
-    eval' st = (st : sts, final_st)
-      where
-        (sts, final_st)
-          | isFinalSt st = ([], st)
-          | otherwise  = eval' (step st)
+    (sts, final_st)
+      | isFinalSt st = ([], st)
+      | otherwise    = eval (step st)
 
 isFinalSt :: TiState -> Bool
 isFinalSt st = case st of
@@ -101,10 +118,8 @@ numStep st n = error "It appears that a number has been applied as a function."
 
 ------------------------------ FOR SHOWING RESULTS -----------------------------
 
-showResults :: TiMachine [TiState] -> IO ()
-showResults result_states = do
-  sts <- result_states
-  mapM_ (print . showState) sts
+showResults :: [TiState] -> IO ()
+showResults = print . PP.vcat . List.map showState
 
 -- We only show the stack.
 showState :: TiState -> Doc
@@ -115,16 +130,16 @@ showStack :: TiHeap -> TiStack -> Doc
 showStack heap stack
   = hcat
   [ PP.text "Stack:\n"
-  , (PP.brackets . PP.nest 4 . PP.hcat) (PP.punctuate (PP.text "\n") (map showStackItem stack))
+  , (PP.brackets . PP.nest 4 . PP.hcat) (PP.punctuate (PP.text "\n") (List.map showStackItem stack))
   ]
   where
     showStackItem addr
       = PP.hcat [showAddr addr , PP.text ": ", showStackNode heap (hLookup heap addr)]
 
 showAddr :: Addr -> Doc
-showAddr = PP.text . show
+showAddr addr = PP.text ("#" ++ (show addr))
 
-showStackNode :: Heap a -> Node a -> Doc
+showStackNode :: Heap (Node a) -> Node a -> Doc
 showStackNode heap (NAp func_addr arg_addr)
   = PP.hsep
   [ PP.text "NAp"
