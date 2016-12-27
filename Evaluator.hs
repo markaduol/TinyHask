@@ -42,7 +42,7 @@ step st = case hLookup (heap st) (head $ stack st) of
 ------- INDIRECTION NODE TRANSITION --------
 
 indStep :: TiState -> Addr -> TiState
-indStep st a = st {stack = a : (stack st)}
+indStep st a = st {stack = a : drop 1 (stack st)}
 
 ------- APPLICATION NODE TRANSITION ---------
 
@@ -59,9 +59,8 @@ scStep st sc args body
   = st {stack = new_stack, heap = new_heap}
   where
     redex_root              = (stack st) !! (length args)
-    new_heap                = hUpdate tmp_heap redex_root (NInd result_addr)
-    (tmp_heap, result_addr) = instantiate body (heap st) globals_env
-    new_stack               = result_addr : (drop (length args + 1) (stack st))
+    new_heap = instantiateAndUpdate body redex_root (heap st) globals_env
+    new_stack               = drop (length args) (stack st)
     globals_env             = Map.union (Map.fromList arg_bindings) (globals st)
     -- Bind argument names to addresses obtained from the stack and heap.
     arg_bindings            = zip args (getArgAddrs (heap st) (stack st))
@@ -78,10 +77,16 @@ getArgAddrs heap (sc_name_addr : stack)
 
 instantiateAndUpdate :: CoreExpr -> Addr -> TiHeap -> TiGlobals -> TiHeap
 instantiateAndUpdate (EAp expr1 expr2) upd_addr heap env
-  = hUpdate heap upd_addr (NAp a1 a2)
+  = hUpdate heap2 upd_addr (NAp a1 a2)
   where
     (heap1, a1) = instantiate expr1 heap env
     (heap2, a2) = instantiate expr2 heap1 env
+instantiateAndUpdate (ENum n) upd_addr heap env
+  = hUpdate heap upd_addr (NNum n)
+instantiateAndUpdate (EVar v) upd_addr heap env
+  = case Map.lookup v env of
+    Nothing       -> error $ "Undefined reference to variable: " ++ (show v)
+    Just var_addr -> hUpdate heap upd_addr (NInd var_addr)
 
 -- Takes an expression, heap and environment associating names to addresses and
 -- creates an instance of the expression on the heap, returning the root of this
