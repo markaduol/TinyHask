@@ -18,9 +18,10 @@ import Data.Functor.Identity
 -- A supercombinator node holds its name, arguments and an expression body
 -- A number node is simply represented as an integer.
 data Node a
-  = NAp Addr Addr
-  | NSupercomb Name [a] (Expr a)
-  | NNum Int
+  = NAp Addr Addr                -- Application
+  | NSupercomb Name [a] (Expr a) -- Supercombinator
+  | NNum Int                     -- Number
+  | NInd Addr                    -- Indirection
   deriving (Show)
 
 -- A stack is represented as a list of addresses.
@@ -79,6 +80,9 @@ tiStatIncSteps s = s+1
 tiStatGetSteps s = s
 
 ---------------------------- UTILITY FUNCTIONS ---------------------------------
+
+-- If we have multiple definitions of a supercombinator, the definition furthest
+-- to the RHS of 'sc_defs' takes precedence.
 
 -- Compiler takes a program, and from it, creates the initial state of the machine.
 compile :: CoreProgram -> TiState
