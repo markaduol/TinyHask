@@ -30,14 +30,14 @@ type Alter a = (Int, [a], (Expr a))
 type CoreAlter = Alter Name
 
 data BinOp
-  = Mul | Div | Add | Sub | GT_ | GTE_ | LT_
+  = MulOp | DivOp | AddOp | SubOp | GT_ | GTE_ | LT_
   | LTE_ | EQ_ | NOT_ | AND_ | OR_
 
 instance Show BinOp where
-  show Mul = "*"
-  show Add = "+"
-  show Sub = "-"
-  show Div = "/"
+  show MulOp = "*"
+  show AddOp = "+"
+  show SubOp = "-"
+  show DivOp = "/"
   show GT_ = ">"
   show GTE_ = "<"
   show LT_ = "<"

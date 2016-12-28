@@ -22,12 +22,15 @@ data Node a
   | NSupercomb Name [a] (Expr a) -- Supercombinator
   | NNum Int                     -- Number
   | NInd Addr                    -- Indirection
+  | NPrim Name Primitive         -- Primitive
   deriving (Show)
+
+data Primitive = Neg | Add | Sub | Mul | Div deriving (Show)
 
 -- A stack is represented as a list of addresses.
 type TiStack = [Addr]
 
-data TiDump = DummyTiDump deriving (Show)
+type TiDump = [TiStack]
 
 -- TiHeap is represented as a heap that contains objects of type Node
 type TiHeap = Heap (Node Name)
@@ -68,44 +71,56 @@ instance Monad TiMachine where
 
 --------------------------- TI-MACHINE INITIIALISATION -------------------------
 
-initial_tidump :: TiDump
-initial_tidump = DummyTiDump
+initialDump :: TiDump
+initialDump = []
 
-initial_stats  :: TiStats
+initialStats  :: TiStats
 tiStatIncSteps :: TiStats -> TiStats
 tiStatGetSteps :: TiStats -> Int
 
-initial_stats    = 0
+initialStats     = 0
 tiStatIncSteps s = s+1
 tiStatGetSteps s = s
 
 ---------------------------- UTILITY FUNCTIONS ---------------------------------
 
 -- If we have multiple definitions of a supercombinator, the definition furthest
--- to the RHS of 'sc_defs' takes precedence.
+-- to the RHS of 'addressOfMain' takes precedence.
 
 -- Compiler takes a program, and from it, creates the initial state of the machine.
 compile :: CoreProgram -> TiState
 compile program
-  = TiState initial_stack initial_tidump initial_heap globals initial_stats
+  = TiState initialStack initialDump initialHeap globals initialStats
   where
-    sc_defs                 = program ++ preludeDefs ++ extraPreludeDefs
-    (initial_heap, globals) = buildInitialHeap sc_defs
-    initial_stack           = [address_of_main]
-    address_of_main         = case Map.lookup "main" globals of
+    scDefs                 = program ++ preludeDefs ++ extraPreludeDefs
+    (initialHeap, globals) = buildInitialHeap scDefs
+    initialStack           = [addressOfMain]
+    addressOfMain          = case Map.lookup "main" globals of
       Just addr -> addr
       Nothing   -> error "main is not defined."
 
 -- TODO: Parallelise
 buildInitialHeap :: [CoreScDefn] -> (TiHeap, TiGlobals)
-buildInitialHeap sc_defs
-  = transToMapGlobals (List.mapAccumL allocate_sc hInitial sc_defs)
+buildInitialHeap scDefs
+  = (heap', Map.fromList $ scAddrs ++ primAddrs)
   where
-    transToMapGlobals :: (TiHeap, [(Name, Addr)]) -> (TiHeap, Map.Map Name Addr)
-    transToMapGlobals (tiHeap, globals)
-      = (tiHeap, Map.fromList globals)
-    allocate_sc :: TiHeap -> CoreScDefn -> (TiHeap, (Name, Addr))
-    allocate_sc heap (sc_name, sc_args, sc_body)
-      = (heap', (sc_name, allocatedAddr))
-      where
-        (heap', allocatedAddr) = hAlloc heap (NSupercomb sc_name sc_args sc_body)
+    (heap, scAddrs)    = (List.mapAccumL allocateSC hInitial scDefs)
+    (heap', primAddrs) = (List.mapAccumL allocatePrim heap primDefs)
+
+allocateSC :: TiHeap -> CoreScDefn -> (TiHeap, (Name, Addr))
+allocateSC heap (scName, scArgs, scBody)
+  = (\(h, addr) -> (h, (scName, addr))) $ hAlloc heap (NSupercomb scName scArgs scBody)
+
+allocatePrim :: TiHeap -> (Name, Primitive) -> (TiHeap, (Name, Addr))
+allocatePrim heap (primName, prim)
+  = (\(h, addr) -> (h, (primName, addr))) $ hAlloc heap (NPrim primName prim)
+
+primDefs :: [(Name, Primitive)]
+primDefs
+  =
+  [ ("negate", Neg)
+  , ("+", Add)
+  , ("-", Sub)
+  , ("/", Div)
+  , ("*", Mul)
+  ]

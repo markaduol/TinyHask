@@ -41,15 +41,15 @@ infixOp s f assoc = Ex.Infix (reservedOp s >> return f) assoc
 
 -- Unary (prefix, postfix) and binary (infix) operators.
 -- The list is ordered in descending order of precedence: that is,
--- all the operators in an individual list have the same
+-- all the operators in an inDivOpidual list have the same
 -- precedence, but may different associativity.
 opTable :: Ex.OperatorTable String () Identity CoreExpr
 opTable = [
-    [ infixOp "*" (EBinApp Mul) Ex.AssocLeft
-    , infixOp "/" (EBinApp Div) Ex.AssocLeft
+    [ infixOp "*" (EBinApp MulOp) Ex.AssocLeft
+    , infixOp "/" (EBinApp DivOp) Ex.AssocLeft
     ],
-    [ infixOp "+" (EBinApp Add) Ex.AssocLeft
-    , infixOp "-" (EBinApp Sub) Ex.AssocLeft
+    [ infixOp "+" (EBinApp AddOp) Ex.AssocLeft
+    , infixOp "-" (EBinApp SubOp) Ex.AssocLeft
     ],
     [ infixOp ">"  (EBinApp GT_) Ex.AssocNone
     , infixOp ">=" (EBinApp GTE_) Ex.AssocNone
@@ -134,7 +134,7 @@ exprApp_Op :: Parser (CoreExpr -> CoreExpr -> CoreExpr)
 exprApp_Op = return EAp
 
 plusOp :: Parser (CoreExpr -> CoreExpr -> CoreExpr)
-plusOp = reserved "+" >> return (EBinApp Add)
+plusOp = reserved "+" >> return (EBinApp AddOp)
 
 expr_P :: Parser CoreExpr
 expr_P = Ex.buildExpressionParser opTable expr_factor_P

@@ -5,39 +5,89 @@ import Language
 import PrettyPrinter
 import Utils
 import Compiler
-
 import Data.Map as Map
 import Data.List as List
 import Control.Monad.State
 import Text.PrettyPrint as PP
 
--- Evaluate compiled program from initial state and return all states from
--- initial state to final state.
+-- | Evaluates compiled program from initial state and returns all states.
 eval :: TiState -> ([TiState], TiState)
-eval st = (st : sts, final_st)
+eval st = (st : sts, finalSt)
   where
-    (sts, final_st)
+    (sts, finalSt)
       | isFinalSt st = ([], st)
       | otherwise    = eval (step st)
 
 isFinalSt :: TiState -> Bool
-isFinalSt st = case st of
-  TiState [addr] _ heap _ _ -> isDataNode (hLookup heap addr)
-  TiState [] _ _ _ _        -> error "Empty Stack!"
-  otherwise                 -> False
+isFinalSt st
+  | dump st == []
+    && (length (stack st) == 1) = isDataNode stackNode
+  | stack st == []              = error "Empty Stack!"
+  | otherwise                   = False
+  where
+    stackNode = hLookup (heap st) (head $ stack st)
 
 isDataNode :: Node a -> Bool
 isDataNode node = case node of
   NNum n    -> True
   otherwise -> False
 
--- First, perform a lookup in the heap for the address at the head of the stack.
+-------- TRANSITIONS ------
+
+-- | Performs state transition
 step :: TiState -> TiState
 step st = case hLookup (heap st) (head $ stack st) of
   NAp a1 a2               -> apStep st a1 a2
   NSupercomb sc args body -> scStep st sc args body
   NNum n                  -> numStep st n
   NInd a                  -> indStep st a
+  NPrim name prim         -> primStep st prim
+
+------- PRIMITIVE NODE TRANSITION ----------
+primStep :: TiState -> Primitive -> TiState
+primStep st prim = case prim of
+  Add -> primArith st (+)
+  Sub -> primArith st (-)
+  Mul -> primArith st (*)
+  Div -> primArith st (div)
+  Neg -> primArith' st ((-) 0)
+
+primArith :: TiState -> (Int -> Int -> Int) -> TiState
+primArith st f = st {stack = stack', dump = dump', heap = heap'}
+  where
+    redexRootAddr          = (stack st) !! 2
+    argAddrs               = Prelude.map (getArgAddr (heap st)) (take 2 . drop 1 $ stack st)
+    argNodes               = Prelude.map (hLookup (heap st)) argAddrs
+    (stack', dump', heap') = reduceArgNodes argNodes
+      where
+        stack''           = drop (length argNodes) (stack st)
+        res               = foldl1 f (List.map (\node -> let (NNum x) = node in x) argNodes)
+        reduceArgNodes [] = (stack'', dump st, hUpdate (heap st) redexRootAddr (NNum res))
+        reduceArgNodes (x:xs)
+          | isDataNode x = reduceArgNodes xs
+          | otherwise    = ([argAddr'], argAddrs' : stack'' : (dump st), heap st)
+          where
+            (argAddr':argAddrs') = drop (length argAddrs - length (x:xs)) argAddrs
+
+primArith' :: TiState -> (Int -> Int) -> TiState
+primArith' st f = st {stack = stack', dump = dump', heap = heap'}
+  where
+    redexRootAddr = (stack st) !! 1
+    argAddr       = getArgAddr (heap st) redexRootAddr
+    argNode       = hLookup (heap st) argAddr
+    (stack', dump', heap')
+      | isDataNode argNode = (stack'', dump st, hUpdate (heap st) redexRootAddr (NNum res))
+      | otherwise          = ([argAddr], stack'' : (dump st), heap st)
+      where
+        stack'' = drop 1 (stack st)
+        res     = let (NNum x) = argNode in f x
+
+---- NUMBER NODE TRANSITION -----
+numStep :: TiState -> Int -> TiState
+numStep st n
+  | length (stack st) == 1
+    && (dump st /= []) = st {stack = head (dump st), dump = tail (dump st)}
+  | otherwise          = error "A number has been applied as a function."
 
 ------- INDIRECTION NODE TRANSITION --------
 
@@ -51,61 +101,77 @@ indStep st a = st {stack = a : drop 1 (stack st)}
 apStep :: TiState -> Addr -> Addr -> TiState
 apStep st a1 a2 = st {stack = a1 : (stack st)}
 
-  ------- SUPERCOMBINATOR NODE TRANSITION ---------
+------- SUPERCOMBINATOR NODE TRANSITION ---------
 
--- See transition rules for pre-conditions.
 scStep :: TiState -> Name -> [Name] -> CoreExpr -> TiState
-scStep st sc args body
-  = st {stack = new_stack, heap = new_heap}
+scStep st sc args body = st {stack = stack', heap = heap'}
   where
-    redex_root              = (stack st) !! (length args)
-    new_heap = instantiateAndUpdate body redex_root (heap st) globals_env
-    new_stack               = drop (length args) (stack st)
-    globals_env             = Map.union (Map.fromList arg_bindings) (globals st)
+    redexRoot = (stack st) !! (length args)
+    heap'     = instantiateAndUpdate body redexRoot (heap st) env
+    stack'    = drop (length args) (stack st)
+    env       = Map.union (Map.fromList argBindings) (globals st)
     -- Bind argument names to addresses obtained from the stack and heap.
-    arg_bindings            = zip args (getArgAddrs (heap st) (stack st))
+    argBindings = zip args (getArgAddrs (heap st) (stack st))
+      where
+        getArgAddrs :: TiHeap -> TiStack -> [Addr]
+        getArgAddrs heap (scNameAddr : stack) = Prelude.map (getArgAddr heap) stack
 
--- Gets address of each argument of a supercombinator
--- The address argument is found on the right-hand side of each application node
--- Pre: Stack contains sequential list of addresses of application nodes of
---      supercombinator (from deepest in tree to highest).
-getArgAddrs :: TiHeap -> TiStack -> [Addr]
-getArgAddrs heap (sc_name_addr : stack)
-  = Prelude.map getArgAddr stack
-  where
-    getArgAddr addr = let (NAp func_addr arg_addr) = hLookup heap addr in arg_addr
+getArgAddr :: TiHeap -> Addr -> Addr
+getArgAddr heap addr = let (NAp funcAddr argAddr) = hLookup heap addr in argAddr
 
 instantiateAndUpdate :: CoreExpr -> Addr -> TiHeap -> TiGlobals -> TiHeap
-instantiateAndUpdate (EAp expr1 expr2) upd_addr heap env
-  = hUpdate heap2 upd_addr (NAp a1 a2)
+
+instantiateAndUpdate (EAp expr1 expr2) updAddr heap env
+  = hUpdate heap2 updAddr (NAp a1 a2)
   where
     (heap1, a1) = instantiate expr1 heap env
     (heap2, a2) = instantiate expr2 heap1 env
-instantiateAndUpdate (ENum n) upd_addr heap env
-  = hUpdate heap upd_addr (NNum n)
-instantiateAndUpdate (EVar v) upd_addr heap env
+
+instantiateAndUpdate (ENum n) updAddr heap env
+  = hUpdate heap updAddr (NNum n)
+
+instantiateAndUpdate (EVar v) updAddr heap env
   = case Map.lookup v env of
-    Nothing       -> error $ "Undefined reference to variable: " ++ (show v)
-    Just var_addr -> hUpdate heap upd_addr (NInd var_addr)
+      Nothing      -> error $ "Undefined reference to variable: " ++ (show v)
+      Just varAddr -> hUpdate heap updAddr (NInd varAddr)
+
+instantiateAndUpdate (ELet is_rec defns expr) updAddr heap env
+  = instantiateAndUpdate expr updAddr heap'' env''
+  where
+    (heap'', env'')
+      = instantiateDefs heap env defns
+    instantiateDefs heap env []
+      = (heap, env)
+    instantiateDefs heap env ((name, expr) : xs)
+      = let
+      { (heap', defnAddr) = instantiate expr heap env
+      ; env'              = Map.insert name defnAddr env
+      } in instantiateDefs heap' env' xs
 
 -- Takes an expression, heap and environment associating names to addresses and
 -- creates an instance of the expression on the heap, returning the root of this
 -- instance. This function performs the necessary expression reduction on the
 -- graph.
 instantiate :: CoreExpr -> TiHeap -> TiGlobals -> (TiHeap, Addr)
+
 instantiate (ENum n) heap env = hAlloc heap (NNum n)
+
 instantiate (EVar v) heap env
   = case Map.lookup v env of
-    Nothing -> error $ "Undefined reference to variable: " ++ (show v)
-    Just a  -> (heap, a)
+      Nothing -> error $ "Undefined reference to variable: " ++ (show v)
+      Just a  -> (heap, a)
+
 instantiate (EAp expr1 expr2) heap env = hAlloc heap2 (NAp a1 a2)
   where
     (heap1, a1) = instantiate expr1 heap env
     (heap2, a2) = instantiate expr2 heap1 env
+
 instantiate (EConstr tag arity) heap env
   = instantiateConstr tag arity heap env
+
 instantiate (ELet is_rec defns expr) heap env
   = instantiateLet defns expr heap env
+
 instantiate e heap env
   = error "Can't instantiate binary expressions, case expressions or lambda expressions."
 
@@ -115,20 +181,15 @@ instantiateConstr tag arity heap env
 
 instantiateLet ::  [CoreDefn] -> CoreExpr -> TiHeap -> TiGlobals -> (TiHeap, Addr)
 instantiateLet defns expr heap env
-  = instantiate expr new_heap new_env
+  = instantiate expr heap'' env''
   where
-    (new_heap, new_env)                        = instantiateDefs heap env defns
+    (heap'', env'')                            = instantiateDefs heap env defns
     instantiateDefs heap env []                = (heap, env)
     instantiateDefs heap env ((name, expr):xs) = let {
-      (heap', defn_addr) = instantiate expr heap env'; -- Mutually recursive, to deal with recursive let bindings.
-      env'               = Map.insert name defn_addr env;
+      (heap', defnAddr) = instantiate expr heap env'; -- Mutually recursive, to deal with recursive let bindings.
+      env'              = Map.insert name defnAddr env;
     } in instantiateDefs heap' env' xs
 
-
----- NUMBER NODE TRANSITION -----
-
-numStep :: TiState -> Int -> TiState
-numStep st n = error "It appears that a number has been applied as a function."
 ------------------------------ FOR SHOWING RESULTS -----------------------------
 
 showResults :: [TiState] -> IO ()
