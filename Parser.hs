@@ -130,12 +130,6 @@ alt_P = do
   ex <- lexeme expr_P
   return ((fromInteger n), vars, ex)
 
-exprApp_Op :: Parser (CoreExpr -> CoreExpr -> CoreExpr)
-exprApp_Op = return EAp
-
-plusOp :: Parser (CoreExpr -> CoreExpr -> CoreExpr)
-plusOp = reserved "+" >> return (EBinApp AddOp)
-
 expr_P :: Parser CoreExpr
 expr_P = Ex.buildExpressionParser opTable expr_factor_P
 

@@ -99,7 +99,12 @@ indStep st a = st {stack = a : drop 1 (stack st)}
 -- We reduce to the left since arguments of supercombinators
 -- are always on the right-hand side of an application node.
 apStep :: TiState -> Addr -> Addr -> TiState
-apStep st a1 a2 = st {stack = a1 : (stack st)}
+apStep st a1 a2 = st {stack = stack', heap = heap'}
+  where
+    apRootAddr      = head $ stack st
+    (stack', heap') = case hLookup (heap st) a2 of
+      NInd x    -> (stack st, hUpdate (heap st) apRootAddr (NAp a1 x))
+      otherwise -> (a1 : (stack st), heap st)
 
 ------- SUPERCOMBINATOR NODE TRANSITION ---------
 
@@ -127,9 +132,17 @@ instantiateAndUpdate (EAp expr1 expr2) updAddr heap env
     (heap1, a1) = instantiate expr1 heap env
     (heap2, a2) = instantiate expr2 heap1 env
 
+instantiateAndUpdate (EBinApp binop expr1 expr2) updAddr heap env
+  = instantiateAndUpdate expr updAddr heap env
+  where
+    expr = EAp (EAp ((EVar . show) binop) expr1) expr2
+
 instantiateAndUpdate (ENum n) updAddr heap env
   = hUpdate heap updAddr (NNum n)
 
+-- If the body is simply a variable, bound to the node stored at the variable's
+-- address in the environment, then we should simply update the redex root with
+-- an indirection to this node (or rather, the address of this node).
 instantiateAndUpdate (EVar v) updAddr heap env
   = case Map.lookup v env of
       Nothing      -> error $ "Undefined reference to variable: " ++ (show v)
@@ -165,6 +178,10 @@ instantiate (EAp expr1 expr2) heap env = hAlloc heap2 (NAp a1 a2)
   where
     (heap1, a1) = instantiate expr1 heap env
     (heap2, a2) = instantiate expr2 heap1 env
+
+instantiate (EBinApp binop expr1 expr2) heap env = instantiate expr heap env
+  where
+    expr = EAp (EAp ((EVar . show) binop) expr1) expr2
 
 instantiate (EConstr tag arity) heap env
   = instantiateConstr tag arity heap env
@@ -213,7 +230,8 @@ showStack heap stack
 showAddr :: Addr -> Doc
 showAddr addr = PP.text ("#" ++ (show addr))
 
--- We show the value of the argument node
+-- We show the value of the value of the argument node and not the
+-- function node
 showStackNode :: Heap (Node a) -> Node a -> Doc
 showStackNode heap (NAp func_addr arg_addr)
   = PP.hsep
@@ -234,3 +252,5 @@ showNode (NNum n)
   = PP.hsep [PP.text "NNum", PP.int n]
 showNode (NInd a)
   = PP.hsep [PP.text "NInd", showAddr a]
+showNode (NPrim name prim)
+  = PP.hsep [PP.text "NPrim", PP.text name]
