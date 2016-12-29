@@ -21,17 +21,21 @@ eval st = (st : sts, finalSt)
 isFinalSt :: TiState -> Bool
 isFinalSt st
   | dump st == []
-    && (length (stack st) == 1) = isDataNode stackNode
+    && (length (stack st) == 1) = isNumNode stackNode
   | stack st == []              = error "Empty Stack!"
   | otherwise                   = False
   where
     stackNode = hLookup (heap st) (head $ stack st)
 
-isDataNode :: Node a -> Bool
-isDataNode node = case node of
+isNumNode :: Node a -> Bool
+isNumNode node = case node of
   NNum n    -> True
   otherwise -> False
 
+isDataNode :: Node a -> Bool
+isDataNode node = case node of
+  NData tag arity -> True
+  otherwise       -> False
 -------- TRANSITIONS ------
 
 -- | Performs state transition
@@ -42,6 +46,14 @@ step st = case hLookup (heap st) (head $ stack st) of
   NNum n                  -> numStep st n
   NInd a                  -> indStep st a
   NPrim name prim         -> primStep st prim
+  NData tag addrs         -> dataStep st
+
+------- DATA NODE TRANSITION -----------
+dataStep :: TiState -> TiState
+dataStep st
+  | length (stack st) == 1
+    && length (dump st) > 0 = st {stack = head (dump st), dump = drop 1 (dump st)}
+  | otherwise               = error "A data node has been applied as a function."
 
 ------- PRIMITIVE NODE TRANSITION ----------
 primStep :: TiState -> Primitive -> TiState
@@ -51,6 +63,36 @@ primStep st prim = case prim of
   Mul -> primArith st (*)
   Div -> primArith st (div)
   Neg -> primArith' st ((-) 0)
+  Cond -> primIf st
+  PrimConstr tag arity -> primConstr st tag arity
+
+primIf :: TiState -> TiState
+primIf st = st {stack = stack', heap = heap', dump = dump'}
+  where
+    redexRootAddr = (head . drop 3) (stack st)
+    condAddr      = getArgAddr (heap st) ((head . drop 1) (stack st))
+    condNode      = hLookup (heap st) condAddr
+    (stack', dump', heap')
+      | isDataNode condNode
+        = (drop 3 (stack st), dump st, hUpdate (heap st) redexRootAddr (getResNode condNode (stack st) (heap st)))
+      | otherwise
+        = ([condAddr], (drop 1 (stack st)) : (dump st), heap st)
+      where
+        getApAddr stack tag
+          | tag == 1  = (head . drop 3) stack -- False
+          | otherwise = (head . drop 2) stack -- True
+        getResNode (NData tag _) stack heap
+          = (NInd . getArgAddr heap . getApAddr stack) tag
+
+-- Checks that constructor is given enough arguments, and if so, it builds a
+-- structured data object in the heap.
+primConstr :: TiState -> Int -> Int -> TiState
+primConstr st tag arity = st {stack = stack', heap = heap'}
+  where
+    stack'        = drop arity (stack st)
+    redexRootAddr = head stack' -- should never result in exception
+    argAddrs      = Prelude.map (getArgAddr (heap st)) (take arity . drop 1 $ stack st)
+    heap'         = hUpdate (heap st) redexRootAddr (NData tag argAddrs)
 
 primArith :: TiState -> (Int -> Int -> Int) -> TiState
 primArith st f = st {stack = stack', dump = dump', heap = heap'}
@@ -64,7 +106,7 @@ primArith st f = st {stack = stack', dump = dump', heap = heap'}
         res               = foldl1 f (List.map (\node -> let (NNum x) = node in x) argNodes)
         reduceArgNodes [] = (stack'', dump st, hUpdate (heap st) redexRootAddr (NNum res))
         reduceArgNodes (x:xs)
-          | isDataNode x = reduceArgNodes xs
+          | isNumNode x = reduceArgNodes xs
           | otherwise    = ([argAddr'], argAddrs' : stack'' : (dump st), heap st)
           where
             (argAddr':argAddrs') = drop (length argAddrs - length (x:xs)) argAddrs
@@ -76,7 +118,7 @@ primArith' st f = st {stack = stack', dump = dump', heap = heap'}
     argAddr       = getArgAddr (heap st) redexRootAddr
     argNode       = hLookup (heap st) argAddr
     (stack', dump', heap')
-      | isDataNode argNode = (stack'', dump st, hUpdate (heap st) redexRootAddr (NNum res))
+      | isNumNode argNode = (stack'', dump st, hUpdate (heap st) redexRootAddr (NNum res))
       | otherwise          = ([argAddr], stack'' : (dump st), heap st)
       where
         stack'' = drop 1 (stack st)

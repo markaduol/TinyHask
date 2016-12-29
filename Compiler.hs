@@ -23,9 +23,17 @@ data Node a
   | NNum Int                     -- Number
   | NInd Addr                    -- Indirection
   | NPrim Name Primitive         -- Primitive
+  | NData Int [Addr]             -- Constructor ID (tag) and list of addresses to nodes holding data
   deriving (Show)
 
-data Primitive = Neg | Add | Sub | Mul | Div deriving (Show)
+data Primitive
+  = Neg
+  | Add
+  | Sub
+  | Mul
+  | Div
+  | Cond -- Needed for "if-else" statements.
+  | PrimConstr Int Int deriving (Show)
 
 -- A stack is represented as a list of addresses.
 type TiStack = [Addr]
