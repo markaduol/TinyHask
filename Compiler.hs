@@ -33,6 +33,11 @@ data Primitive
   | Mul
   | Div
   | Cond -- Needed for "if-else" statements.
+  | LT_Prim
+  | LEQ_Prim
+  | EQ_Prim
+  | GEQ_Prim
+  | GT_Prim
   | PrimConstr Int Int deriving (Show)
 
 -- A stack is represented as a list of addresses.
@@ -131,4 +136,12 @@ primDefs
   , ("-", Sub)
   , ("/", Div)
   , ("*", Mul)
+  , ("if", Cond)
+  , ("False", PrimConstr 1 0)
+  , ("True", PrimConstr 2 0)
+  , ("<", LT_Prim)
+  , ("<=", LEQ_Prim)
+  , ("==", EQ_Prim)
+  , (">=", GEQ_Prim)
+  , (">", GT_Prim)
   ]

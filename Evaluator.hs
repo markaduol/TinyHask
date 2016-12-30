@@ -21,8 +21,8 @@ eval st = (st : sts, finalSt)
 isFinalSt :: TiState -> Bool
 isFinalSt st
   | dump st == []
-    && (length (stack st) == 1) = isNumNode stackNode
-  | stack st == []              = error "Empty Stack!"
+    && (length (stack st) == 1) = or (List.map ($ stackNode) [isNumNode, isDataNode])
+  | stack st == []              = True
   | otherwise                   = False
   where
     stackNode = hLookup (heap st) (head $ stack st)
@@ -62,9 +62,15 @@ primStep st prim = case prim of
   Sub -> primArith st (-)
   Mul -> primArith st (*)
   Div -> primArith st (div)
+  EQ_Prim -> primDyadic st (\(NNum x1) (NNum x2) -> NData (cmp (==) x1 x2) [])
   Neg -> primArith' st ((-) 0)
   Cond -> primIf st
   PrimConstr tag arity -> primConstr st tag arity
+  where
+    -- Assigns appropriate tag for boolean constructor.
+    cmp f a b
+      | f a b     = 2
+      | otherwise = 1
 
 primIf :: TiState -> TiState
 primIf st = st {stack = stack', heap = heap', dump = dump'}
@@ -94,6 +100,27 @@ primConstr st tag arity = st {stack = stack', heap = heap'}
     argAddrs      = Prelude.map (getArgAddr (heap st)) (take arity . drop 1 $ stack st)
     heap'         = hUpdate (heap st) redexRootAddr (NData tag argAddrs)
 
+-- | Pre: At least 3 addresses on stack with corresponding nodes in heap.
+primDyadic :: TiState -> (Node Name -> Node Name -> Node Name) -> TiState
+primDyadic st f = st {stack = stack', dump = dump', heap = heap'}
+  where
+    redexRootAddr          = (stack st) !! 2
+    argAddrs               = Prelude.map (getArgAddr (heap st)) (take 2 . drop 1 $ stack st)
+    argNodes               = Prelude.map (hLookup (heap st)) argAddrs
+    (stack', dump', heap') = reduceArgNodes argNodes
+      where
+        stack'' = drop (length argNodes) (stack st)
+        reduceArgNodes []
+          = let res = f (argNodes !! 0) (argNodes !! 1)
+            in (stack'', dump st, hUpdate (heap st) redexRootAddr res)
+        reduceArgNodes (x:xs)
+          | isNumNode x = reduceArgNodes xs
+          --
+          | otherwise   = ([argAddr'], dump'', heap st)
+          where
+            (argAddr':argAddrs') = drop (length argAddrs - length (x:xs)) argAddrs
+            dump'' = List.foldr (\addr acc -> [addr] : acc) (stack'' : (dump st)) argAddrs'
+
 primArith :: TiState -> (Int -> Int -> Int) -> TiState
 primArith st f = st {stack = stack', dump = dump', heap = heap'}
   where
@@ -103,13 +130,14 @@ primArith st f = st {stack = stack', dump = dump', heap = heap'}
     (stack', dump', heap') = reduceArgNodes argNodes
       where
         stack''           = drop (length argNodes) (stack st)
-        res               = foldl1 f (List.map (\node -> let (NNum x) = node in x) argNodes)
+        res               = foldl1 f (List.map (\node -> let (NNum x) = node in x) argNodes) -- Used when args are already evaluated to normal form.
         reduceArgNodes [] = (stack'', dump st, hUpdate (heap st) redexRootAddr (NNum res))
         reduceArgNodes (x:xs)
           | isNumNode x = reduceArgNodes xs
-          | otherwise    = ([argAddr'], argAddrs' : stack'' : (dump st), heap st)
+          | otherwise   = ([argAddr'], dump'', heap st)
           where
             (argAddr':argAddrs') = drop (length argAddrs - length (x:xs)) argAddrs
+            dump'' = List.foldr (\addr acc -> [addr] : acc) (stack'' : (dump st)) argAddrs'
 
 primArith' :: TiState -> (Int -> Int) -> TiState
 primArith' st f = st {stack = stack', dump = dump', heap = heap'}
@@ -257,7 +285,7 @@ showResults = print . PP.vcat . List.map showState
 -- We only show the stack.
 showState :: TiState -> Doc
 showState (TiState stack dump heap globals stats)
-  = showStack heap stack <> (PP.text "\n")
+  = showStack heap stack <+> (PP.text ((show . length) dump)) <> (PP.text "\n")
 
 showStack :: TiHeap -> TiStack -> Doc
 showStack heap stack
@@ -296,3 +324,9 @@ showNode (NInd a)
   = PP.hsep [PP.text "NInd", showAddr a]
 showNode (NPrim name prim)
   = PP.hsep [PP.text "NPrim", PP.text name]
+showNode (NData tag dataAddrs)
+  = PP.hsep
+  [ PP.text "NData"
+  , PP.int tag
+  , (PP.brackets . PP.hsep) (PP.punctuate PP.comma (List.map showAddr dataAddrs))
+  ]
