@@ -9,7 +9,6 @@ type CoreScDefn = ScDefn Name
 type Name = String
 type IsRec = Bool
 
--- TODO: Should we make application left-associative by using atomic expressions?
 data Expr a
   = EAp (Expr a) (Expr a) -- Application
   | EBinApp BinOp (Expr a) (Expr a) -- Binary application

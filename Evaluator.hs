@@ -58,15 +58,21 @@ dataStep st
 ------- PRIMITIVE NODE TRANSITION ----------
 primStep :: TiState -> Primitive -> TiState
 primStep st prim = case prim of
-  Add -> primArith st (+)
-  Sub -> primArith st (-)
-  Mul -> primArith st (*)
-  Div -> primArith st (div)
-  EQ_Prim -> primDyadic st (\(NNum x1) (NNum x2) -> NData (cmp (==) x1 x2) [])
+  Add -> primDyadic st (arithFunc (+))
+  Sub -> primDyadic st (arithFunc (-))
+  Mul -> primDyadic st (arithFunc (*))
+  Div -> primDyadic st (arithFunc (div))
+  LT_Prim  -> primDyadic st (boolFunc (<))
+  LEQ_Prim -> primDyadic st (boolFunc (<=))
+  EQ_Prim  -> primDyadic st (boolFunc (==))
+  GEQ_Prim -> primDyadic st (boolFunc (>=))
+  GT_Prim  -> primDyadic st (boolFunc (>))
   Neg -> primArith' st ((-) 0)
   Cond -> primIf st
   PrimConstr tag arity -> primConstr st tag arity
   where
+    arithFunc f = (\(NNum x1) (NNum x2) -> NNum (x1 `f` x2))
+    boolFunc f  = (\(NNum x1) (NNum x2) -> NData (cmp f x1 x2) [])
     -- Assigns appropriate tag for boolean constructor.
     cmp f a b
       | f a b     = 2
@@ -116,24 +122,6 @@ primDyadic st f = st {stack = stack', dump = dump', heap = heap'}
         reduceArgNodes (x:xs)
           | isNumNode x = reduceArgNodes xs
           --
-          | otherwise   = ([argAddr'], dump'', heap st)
-          where
-            (argAddr':argAddrs') = drop (length argAddrs - length (x:xs)) argAddrs
-            dump'' = List.foldr (\addr acc -> [addr] : acc) (stack'' : (dump st)) argAddrs'
-
-primArith :: TiState -> (Int -> Int -> Int) -> TiState
-primArith st f = st {stack = stack', dump = dump', heap = heap'}
-  where
-    redexRootAddr          = (stack st) !! 2
-    argAddrs               = Prelude.map (getArgAddr (heap st)) (take 2 . drop 1 $ stack st)
-    argNodes               = Prelude.map (hLookup (heap st)) argAddrs
-    (stack', dump', heap') = reduceArgNodes argNodes
-      where
-        stack''           = drop (length argNodes) (stack st)
-        res               = foldl1 f (List.map (\node -> let (NNum x) = node in x) argNodes) -- Used when args are already evaluated to normal form.
-        reduceArgNodes [] = (stack'', dump st, hUpdate (heap st) redexRootAddr (NNum res))
-        reduceArgNodes (x:xs)
-          | isNumNode x = reduceArgNodes xs
           | otherwise   = ([argAddr'], dump'', heap st)
           where
             (argAddr':argAddrs') = drop (length argAddrs - length (x:xs)) argAddrs
@@ -264,7 +252,7 @@ instantiate e heap env
 
 instantiateConstr :: Int -> Int -> TiHeap -> TiGlobals -> (TiHeap, Addr)
 instantiateConstr tag arity heap env
-  = error "Can't instantiate constructor expressions yet."
+  = hAlloc heap (NPrim ("Constr" ++ (show tag)) (PrimConstr tag arity))
 
 instantiateLet ::  [CoreDefn] -> CoreExpr -> TiHeap -> TiGlobals -> (TiHeap, Addr)
 instantiateLet defns expr heap env
