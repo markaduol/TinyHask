@@ -1,6 +1,10 @@
 module GCompiler where
 
 import Utils
+import Data.Map as Map
+import Data.List as List
+import Syntax
+import Language
 
 ------ STATE ------
 
@@ -60,7 +64,7 @@ instance Eq Instruction where
 data Node
   = NNum Int           -- Number
   | NAp Addr Addr      -- Application
-  | NGlobal Int GmCode -- Global
+  | NGlobal Int GMCode -- Global
   deriving (Show)
 
 getArgAddr :: Node -> Addr
@@ -81,6 +85,19 @@ data AInstruction
   | IMult
   deriving (Show)
 
+------ COMPILER TYPES ------
+
+-- | A compiled supercombinator is represented by its name, the number of arguments
+--   that its underlying expression takes, and the list of compiled instructions.
+type GMCompiledSC = (Name, Int, GMCode)
+
+-- | The G-machine compiler is a function taking a core expression and an environment and
+--   returning compiled G-machine code.
+type GMCompiler = CoreExpr -> GMEnvironment -> GMCode
+
+-- | The G-machine environment is a map from the names of global variables and
+type GMEnvironment = Map.Map Name Int
+
 ------ EVALUATION ------
 
 gmEval :: GMState -> [GMState]
@@ -88,11 +105,11 @@ gmEval st = st : sts
   where
     sts
       | gmFinal st = []
-      | otherwise  = eval ((doAdmin . gmStep) st)
+      | otherwise  = gmEval ((doAdmin . gmStep) st)
       where
         gmFinal :: GMState -> Bool
-        doAdmin :: GMState -> GMState
         gmFinal st = (code st) == []
+        doAdmin :: GMState -> GMState
         doAdmin st = st {stats = incStepStats (stats st)}
 
 gmStep :: GMState -> GMState
@@ -126,7 +143,7 @@ gmPush :: Int -> GMState -> GMState
 gmPush n st
   = st {stack = b : (stack st)}
   where
-    b = getArgAddr (stackAt (n+1) (stack st))
+    b = getArgAddr (hLookup (heap st) (stackAt (n+1) (stack st)))
 
 gmMkap :: GMState -> GMState
 gmMkap st
@@ -152,6 +169,59 @@ gmUnwind st
       | length as < n = error "Too few arguments."
       | otherwise     = st {code = c}
 
+-- COMPILER --
+
+compile :: CoreProgram -> GMState
+compile program
+  = GMState initialCode initialStack initialHeap globals initialStats
+  where
+    initialCode  = [Pushglobal "main", Unwind] -- When this is evaluated, we will obtain the address of the "main" supercombinator and then unwind.
+    initialStack = []
+    (initialHeap, globals) = buildInitialHeap program
+
+-- | To construct the initial heap and to provide the map of the global nodes
+--   for each global defined, we use 'buildInitialHeap'. This is just as it was
+--   in the template machine.
+--   Note that in 'GMHeap', each heap object is a node.
+--   'buildInitialHeap' uses 'mapAccumL' ti allocate nodes in the heap for each
+--   compiled, global, supercombinator definition.
+buildInitialHeap :: CoreProgram -> (GMHeap, GMGlobals)
+buildInitialHeap program
+  = (\(h, g) -> (h, Map.fromList g)) $ List.mapAccumL allocateSC hInitial compiled
+  where
+    compiled = Prelude.map compileSc (preludeDefs ++ program) ++ compiledPrimitives -- Compile all supercombinators
+
+-- | 'allocateSC' allocates a new global node in the heap, 'heap', for its
+--   compiled supercombinator argument. It returns the new heap and the address
+--   where of the global node in the heap.
+allocateSC :: GMHeap -> GMCompiledSC -> (GMHeap, (Name, Addr))
+allocateSC heap (name, nargs, instrs)
+  = (heap', (name, addr))
+  where
+    (heap', addr) = hAlloc heap (NGlobal nargs instrs)
+
+compileSc :: (Name, [Name], CoreExpr) -> GMCompiledSC
+compileSc (name, scArgs, body)
+  = (name, length scArgs, compileR body (Map.fromList $ zip scArgs [0..]))
+
+-- | 'e' is the expression
+compileR :: GMCompiler
+compileR e taggedScArgs = compileC e taggedScArgs ++ [Slide (length taggedScArgs + 1), Unwind]
+
+compileC :: GMCompiler
+compileC (EVar v) env
+  = case Map.lookup v env of
+    Just n    -> [Push n]
+    otherwise -> [Pushglobal v]
+compileC (ENum n) env    = [Pushint n]
+compileC (EAp e1 e2) env = compileC e2 env ++ compileC e1 (argOffset 1 env) ++ [Mkap]
+
+-- | 'argOffset' is used to change stack offsets to the specified value
+argOffset :: Int -> GMEnvironment -> GMEnvironment
+argOffset n = Map.map (+n)
+
+compiledPrimitives :: [GMCompiledSC]
+compiledPrimitives = []
 ------ ARITHMETIC ------
 
 aInterpret :: AExpr -> Int
@@ -164,8 +234,8 @@ aCompile (Num n)      = [INum n]
 aCompile (Plus a1 a2) = (aCompile a1) ++ (aCompile a2) ++ [IPlus]
 aCompile (Mult a1 a2) = (aCompile a1) ++ (aCompile a2) ++ [IMult]
 
-aEval :: ([AInstruction], [Int]) -> Int
+{-aEval :: ([AInstruction], [Int]) -> Int
 aEval ([]         , [n])    = n
 aEval (INum n : is, ns)     = aEval (i, n:ns)
 aEval (IPlus :  is, m:n:ns) = aEval (i, (m + n) : ns)
-aEval (IMult :  is, m:n:ns) = aEval (i, (m * n) : ns)
+aEval (IMult :  is, m:n:ns) = aEval (i, (m * n) : ns)-}
